@@ -9,22 +9,197 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## R Markdown
+## Introduction
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+The [Human Activity Recognition Project](http://groupware.les.inf.puc-rio.br/har)
+at Groupware Technologies conducted a study to determine if 6 participants were lifting
+weights correctly.  The Weight Lifting Exercise Datasets for 
+[training](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv) and 
+[testing](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv) 
+consisted of data from accelerator sensors placed on the arm, forearm, belt, and 
+dumbbells of participants asked to lift correctly (classification for 
+column classe = A) and also to lift incorrectly in four additional ways 
+(classe = B – E).   The goal of my study was to use the data from the training 
+set to build a model to predict the classe value then apply this model to the 
+training set in which the classe value was not known.
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+## Data Processing and Partitions
 
-```{r cars}
-summary(cars)
+Because the testing data did not have known classe values, I chose to divide the
+raw training data into two parts, with 70% randomly assigned to the training data 
+subset and the remaining 30% assigned to the validation data set.  In this way 
+the model could be developed with the training subset and applied to the validation 
+data set to have a good indication of whether the testing data set might be correctly predicted. After looking at the data, there were several columns that could be 
+ignored. For example, the first column represented the index of the data, which added no 
+extra content and was removed.  There were three date fields, which did not appear to contribute to the classification I was looking for and were removed.  Two 
+window indicators columns also provided no information about the classification.
+It also became clear that there were a large number of columns that either 
+had no data or consisted of
+“NA” (not applicable).  These columns, which I removed, had names that contained 
+“kurt”, “skew”, “max”, “min”, “amplitude”, “var”, “avg”, and “std”. I had fear 
+that the user_name column (names of the six participants) might influence the 
+data, but I did not take out that column in the first run.  I put removing the
+user_name column on the 
+list of things I might try if my results were poor.  The measure of "good enough" 
+results was whether the model could correctly predict the testing data, as 
+indicated on the course Quiz 4.  
+
+```{r  loadLibraries,echo=FALSE,message=FALSE}
+library(caret);library(parallel); library(doParallel)
 ```
 
-## Including Plots
+```{r dataPartition}
+set.seed(34543)
+rawTraining <- read.csv("pml-training.csv");  testing <- read.csv("pml-testing.csv")
 
-You can also embed plots, for example:
+# 1. remove X as index, times, windows
+rawTraining <- rawTraining[,-1]; testing <- testing[,-1]
+rawTraining <- rawTraining[,-grep("time",colnames(rawTraining))]
+testing     <- testing    [,-grep("time",colnames(testing))]
+rawTraining <- rawTraining[,-grep("window",colnames(rawTraining))]
+testing     <- testing    [,-grep("window",colnames(testing))]
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+# 3. mostly empty data: 
+rawTraining <- rawTraining[,-grep("kurt",colnames(rawTraining))]
+testing     <- testing    [,-grep("kurt",colnames(testing))]
+rawTraining <- rawTraining[,-grep("skew",colnames(rawTraining))]
+testing     <- testing    [,-grep("skew",colnames(testing))]
+rawTraining <- rawTraining[,-grep("max",colnames(rawTraining))]
+testing     <- testing    [,-grep("max",colnames(testing))]
+rawTraining <- rawTraining[,-grep("min",colnames(rawTraining))]
+testing     <- testing    [,-grep("min",colnames(testing))]
+rawTraining <- rawTraining[,-grep("amplitude",colnames(rawTraining))]
+testing     <- testing    [,-grep("amplitude",colnames(testing))]
+rawTraining <- rawTraining[,-grep("var",colnames(rawTraining))]
+testing     <- testing    [,-grep("var",colnames(testing))]
+rawTraining <- rawTraining[,-grep("avg",colnames(rawTraining))]
+testing     <- testing    [,-grep("avg",colnames(testing))]
+rawTraining <- rawTraining[,-grep("std",colnames(rawTraining))]
+testing     <- testing    [,-grep("std",colnames(testing))]
+
+# 4. break training into training and validation
+inTrain <- createDataPartition(rawTraining$classe,p=0.7,list=FALSE)
+training   <- rawTraining[ inTrain,]
+validation <- rawTraining[-inTrain,]
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+## The Model
+
+According to the lectures in the Practical Machine Learning Course, random 
+forests are generally the most accurate but can take a lot of time.  Because 
+time was not necessarily a factor in this study, I chose to use a random 
+forest model. The random forest model naturally provides cross validation, 
+the technique of continuing to repartition the data again and again to make 
+sure the break up of data does not erroneously affect the outcome.  In the 
+random forest model, hundreds of decision trees are created, 
+broken up in different ways and on different variables, then the results 
+averaged to provide the best accuracy.  This explains why the model is both 
+accurate and time consuming.
+
+I created a function based on the recommendations in the Practical Machine 
+Learning Course discussion forum to reduce the run time by using parallel 
+cores of my Mac while running the random forest model. Note the trainControl
+function with 10-fold cross validation and allowParallel flag as suggested
+byt the discussion forum. This function also 
+printed out the amount of time to run the model.  I had fear that the 
+large number of remaining columns (53) might be large
+enough to slow the system down.  I considered applying a pre processing 
+stage to reduce the number of features.  However, the number of features 
+was small compared to the data size. (For example, the training subset 
+contained 13,737 rows.)  I put it on my list of things to try if the 
+time was determined to be too large. 
+
+To determine if this model would provide the kind of accuracy I was looking 
+for before I let it run for hours, I selected a random 1000-element subset 
+of the training data.  This subset took 64 seconds to run and was used to 
+predict the validation results, which were fed into the confusionMatrix 
+function to produce an accuracy of 91.11%.  Although this was not the 99% 
+I felt I would need to get the testing data correct, it told me that the 
+procedure was sound.  I expected that with more training data, the model 
+would be accurate enough.
+
+```{r Model, eval=FALSE}
+doRFTrain <- function(df){
+      cluster <- makeCluster(detectCores() - 1) # convention to leave 1 core for OS
+      registerDoParallel(cluster)
+      
+      fitControl <- trainControl(method = "cv",number = 10,
+            allowParallel = TRUE)
+      timeToRun = system.time(modFit <- train(classe~., method="rf", 
+            prox=TRUE,data=df, trControl = fitControl))
+      
+      stopCluster(cluster)
+      registerDoSEQ()
+      
+      print(timeToRun)
+      modFit
+}
+
+modFit <- doRFTrain(training)
+save(modFit, file="modFit.rda")
+```
+
+## The Results and Out-Of-Sample Error Estimate
+
+I used the training subset to train the model, which took 23407.78 
+seconds (6.5 hours).  The final model used 500 trees and the number of 
+variables tried at each split was 29. The predicted validation results 
+were 0.9934 according to the confusionMatrix function.  The 95% confidence 
+interval on the accuracy ranged from 0.991 to 0.9953.  The p-value was less 
+than 2.2e-16. I then used this model to predict the testing data results.
+The 20 data points matched the quiz values exactly. For this reason, I did 
+not apply any other procedures to the data. 
+
+```{r results, message=FALSE}
+load(file="modFit.rda")
+modFit$finalModel$confusion
+
+pred <- predict(modFit,validation)
+confMx <- confusionMatrix(pred,validation$classe)
+confMx$overall[1]
+confMx$table
+```
+
+The out-of-sample error estimate can be calculated from the validation 
+confusion matrix because technically this data is out of the sample used 
+to create the model.  This error is the number of wrong classifications 
+divided by the number of total classifications, in this case the number 
+of incorrect classifications was 11 + 3 + 4 + 3 + 8  + 3 + 1 + 1 + 5= 39 
+out of 5885 samples, or 0.006627 or 0.6627%.   Similarly, the model (based 
+only on the training subset) produced an out-of-bag error rate of 0.75%. 
+The out-of-bag error refers to the fact that the random forest bootstraps 
+the data.  This means it takes a sample with replacement from the original 
+data.  A model is fit to the data, and then the model is applied to predict 
+the part of the data not selected in the sample.  This is an approximation 
+for the true out-of-sample error rate.  In this case the out-of-bag estimate 
+from the model itself based on the training subset, and the calculated 
+out-of-sample estimated error rate from the validation data not used in 
+the model are both a little over half a percent.  
+
+## Figures
+
+The top 7 most important variables from the model (modFit\$finalModel\$importance:
+pitch_forearm, roll_forearm, magnet_dumbbell_y, magnet_dumbbell_z, yaw_belt, 
+pitch_belt, roll_belt)
+were plotted against each other for the validation data in Figure 1, colored by 
+the prediction. Note that blue represents classification "A", which corresponds 
+to correct form.  Figure 2, 3, and 4 show magnet_belt_y vs. pitch_forearm, 
+yaw_belt vs. roll_forearm, and roll_belt vs. roll_forearm, respectively. There is
+modest separation in each plot, but no one plot would be sufficient to
+classify the data. From these plots we can see why a combination of columns would be necessary to get good classification results.
+
+```{r figs, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10, fig.height=10}
+smValidation <- validation[,c(2,3,4,13,14,41,42,54)]
+
+featurePlot(x=smValidation,y=smValidation$classe, plot="pairs",
+            auto.key=list(columns=8),main="Figure 1")
+```
+
+```{r figs1, echo=FALSE, message=FALSE, warning=FALSE}
+qplot(validation$magnet_belt_y,validation$pitch_forearm,
+               color=validation$classe, main="Figure 2")
+qplot(validation$yaw_belt, validation$roll_forearm,
+               color=validation$classe, main="Figure 3")
+qplot(validation$roll_belt, validation$roll_forearm,
+               color=validation$classe, main="Figure 4")
+```
