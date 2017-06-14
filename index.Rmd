@@ -186,7 +186,7 @@ the prediction. Note that blue represents classification "A", which corresponds
 to correct form.  Figure 2, 3, and 4 show magnet_belt_y vs. pitch_forearm, 
 yaw_belt vs. roll_forearm, and roll_belt vs. roll_forearm, respectively. There is
 modest separation in each plot, but no one plot would be sufficient to
-classify the data. From these plots we can see why a combination of columns would be necessary to get good classification results.
+classify the data. From these plots we can see why a combination of columns would be necessary to get good classification results.  WORDCOUNT = 1115.
 
 ```{r figs, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10, fig.height=10}
 smValidation <- validation[,c(2,3,4,13,14,41,42,54)]
